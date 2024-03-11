@@ -1,0 +1,7 @@
+input_imgs_dir: "/home/zhaizhichao/gkf_proj/FateZero-diffusers-0.11.1/FateZero-main/data/xinye2-Scene-001.mp4.all_frames.crop"
+point_coords: [0.6, 0.7]
+text_prompt: "sit on an outdoor bench"
+dilate_kernel_size: 5
+seed: 1
+sample_rate: 4
+use_cf_attn: True

@@ -1,8 +1,8 @@
 import cv2
 import numpy as np
 from PIL import Image
-from typing import Any, Dict, List
-
+from typing import Any, Dict, List,Sequence
+import imageio
 
 def load_img_to_array(img_p):
     img = Image.open(img_p)
@@ -83,3 +83,35 @@ def get_clicked_point(img_path):
     cv2.destroyAllWindows()
 
     return last_point
+
+
+
+def save_images_as_gif(
+    images: Sequence[Image.Image],
+    save_path: str,
+    loop=0,
+    duration=100,
+    optimize=False,
+) -> None:
+
+    images[0].save(
+        save_path,
+        save_all=True,
+        append_images=images[1:],
+        optimize=optimize,
+        loop=loop,
+        duration=duration,
+    )
+
+def save_images_as_mp4(
+    images: Sequence[Image.Image],
+    save_path: str,
+) -> None:
+
+    writer_edit = imageio.get_writer(
+        save_path,
+        fps=10)
+    for i in images:
+        init_image = i.convert("RGB")
+        writer_edit.append_data(np.array(init_image))
+    writer_edit.close()

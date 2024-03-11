@@ -60,11 +60,19 @@ def setup_args(parser):
         help="Use deterministic algorithms for reproducibility.",
     )
 
+def coord_norm2abs(coord,img):
+    h,w,_ = img.shape
+    x,y = coord[0],coord[1]
+
+    y_abs = y*h
+    x_abs = x*w
+
+    return [x_abs,y_abs]
 
 
 if __name__ == "__main__":
     """Example usage:
-    python replace_anything.py \
+    CUDA_VISIBLE_DEVICES=1 python replace_anything.py \
         --input_img ./example/replace-anything/dog.png \
         --coords_type key_in \
         --point_coords 750 500 \
@@ -73,6 +81,10 @@ if __name__ == "__main__":
         --output_dir ./results \
         --sam_model_type "vit_h" \
         --sam_ckpt ./pretrained_models/sam_vit_h_4b8939.pth
+    
+    export HF_ENDPOINT=https://hf-mirror.com
+    example/xinye4_24x256x256_sr4/00000.png
+
     """
     parser = argparse.ArgumentParser()
     setup_args(parser)
@@ -84,7 +96,9 @@ if __name__ == "__main__":
     elif args.coords_type == "key_in":
         latest_coords = args.point_coords
     img = load_img_to_array(args.input_img)
-
+    if latest_coords[0]<1 and latest_coords[1] < 1:
+        latest_coords = coord_norm2abs(latest_coords,img)
+    
     masks, _, _ = predict_masks_with_sam(
         img,
         [latest_coords],
@@ -134,3 +148,21 @@ if __name__ == "__main__":
         img_replaced = replace_img_with_sd(
             img, mask, args.text_prompt, device=device)
         save_array_to_img(img_replaced, img_replaced_p)
+
+
+
+    """Example usage:
+    CUDA_VISIBLE_DEVICES=0 python replace_anything.py \
+        --input_img /home/zhaizhichao/gkf_proj/FateZero-diffusers-0.11.1/FateZero-main/data/xinye2-Scene-001.mp4.all_frames.crop/00000.png \
+        --coords_type key_in \
+        --point_coords 0.5 0.5 \
+        --point_labels 1 \
+        --text_prompt "sit in an office room" \
+        --output_dir ./results/xinye2-Scene-001.mp4.all_frames.crop \
+        --sam_model_type "vit_h" \
+        --sam_ckpt ./pretrained_models/sam_vit_h_4b8939.pth
+    
+    export HF_ENDPOINT=https://hf-mirror.com
+    
+
+    """

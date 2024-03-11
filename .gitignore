@@ -19,3 +19,6 @@ pretrained_models/big-lama
 results/*
 
 
+example/*
+
+results*/*

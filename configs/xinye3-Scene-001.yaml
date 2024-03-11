@@ -1,0 +1,7 @@
+input_imgs_dir: "/home/zhaizhichao/gkf_proj/FateZero-diffusers-0.11.1/FateZero-main/data/xinye3-Scene-001.mp4.all_frames"
+point_coords: [0.6, 0.5]
+text_prompt: "sits on a barstool in a fancy bar"
+dilate_kernel_size: 5
+seed: 4781
+sample_rate: 4
+use_cf_attn: False

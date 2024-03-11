@@ -37,7 +37,8 @@ def replace_img_with_sd(
         mask: np.ndarray,
         text_prompt: str,
         step: int = 50,
-        device="cuda"
+        device="cuda",
+        seed = None,
 ):
     pipe = StableDiffusionInpaintPipeline.from_pretrained(
         "stabilityai/stable-diffusion-2-inpainting",
@@ -49,6 +50,7 @@ def replace_img_with_sd(
         image=Image.fromarray(img_padded),
         mask_image=Image.fromarray(255 - mask_padded),
         num_inference_steps=step,
+        seed=seed,
     ).images[0]
     height, width, _ = img.shape
     img_resized, mask_resized = recover_size(

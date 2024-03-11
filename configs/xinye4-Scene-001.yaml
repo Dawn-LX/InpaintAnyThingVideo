@@ -1,0 +1,7 @@
+input_imgs_dir: "/home/zhaizhichao/gkf_proj/FateZero-diffusers-0.11.1/FateZero-main/data/xinye4-Scene-001.mp4.frames"
+point_coords: [0.73, 0.86]
+text_prompt: "stand in front of a castle"
+dilate_kernel_size: 5
+seed: 119
+sample_rate: 4
+use_cf_attn: False

@@ -1,0 +1,9 @@
+
+
+input_imgs_dir: "/home/zhaizhichao/gkf_proj/FateZero-diffusers-0.11.1/FateZero-main/data/xinye1-Scene-001.mp4.all_frames"
+point_coords: [0.5, 0.57]
+text_prompt: "stand on a fancy wedding stage"
+dilate_kernel_size: 5
+seed: null
+sample_rate: 4
+use_cf_attn: True
