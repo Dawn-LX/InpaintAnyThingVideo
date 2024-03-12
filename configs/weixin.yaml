@@ -1,0 +1,7 @@
+input_imgs_dir: "/home/zhaizhichao/gkf_proj/Inpaint-Anything/configs/weixin.mp4.frames"
+point_coords: [0.2, 0.8]
+text_prompt: "stand in front of a window with a city view"
+dilate_kernel_size: 5
+seed: 119
+sample_rate: 4
+use_cf_attn: True

@@ -64,19 +64,112 @@ class CrossFrameAttnProcessor:
             # former_frame_index[0] = 0
             former_frame_index = [0] * video_length
             key = rearrange(key, "(b f) d c -> b f d c", f=video_length)
+            # print(key.shape)
             key = key[:, former_frame_index]
+            # print(key.shape)
             key = rearrange(key, "b f d c -> (b f) d c")
             value = rearrange(value, "(b f) d c -> b f d c", f=video_length)
             value = value[:, former_frame_index]
             value = rearrange(value, "b f d c -> (b f) d c")
 
+        # print(query.shape,"query")
         query = attn.head_to_batch_dim(query)
+        # print(query.shape,"query after head_to_batch_dim")
         key = attn.head_to_batch_dim(key)
         value = attn.head_to_batch_dim(value)
 
         attention_probs = attn.get_attention_scores(query, key, attention_mask)
+        # print(attention_probs.shape,"attention_probs")
         hidden_states = torch.bmm(attention_probs, value)
+        # print(hidden_states.shape,"hidden_states")
         hidden_states = attn.batch_to_head_dim(hidden_states)
+        # assert False
+
+        # linear proj
+        hidden_states = attn.to_out[0](hidden_states)
+        # dropout
+        hidden_states = attn.to_out[1](hidden_states)
+
+        return hidden_states
+
+
+
+class CrossFrameAttnProcessorPrev:
+    def __init__(self, unet_chunk_size=2):
+        # self.unet_chunk_size = unet_chunk_size
+        print("args.use_cf_attn = True, CrossFrameAttnProcessorPrev init finish")
+    def __call__(
+            self,
+            attn,
+            hidden_states,
+            encoder_hidden_states=None,
+            attention_mask=None):
+        batch_size, sequence_length, _ = hidden_states.shape
+        attention_mask = attn.prepare_attention_mask(attention_mask, sequence_length, batch_size)
+        query = attn.to_q(hidden_states)
+
+        is_cross_attention = encoder_hidden_states is not None
+        if encoder_hidden_states is None:
+            encoder_hidden_states = hidden_states
+        # elif attn.cross_attention_norm: # Text2Video-Zero uses diffusers==0.14.0
+        # elif attn.norm_cross is not None: # here we use diffusers==0.23.1
+        elif hasattr(attn,"norm_cross") and (attn.norm_cross is not None): # for both diffusers==0.14.0 and diffusers==0.23.1
+            '''gkf: NOTE
+                for diffusers==0.14.0: 
+                    attn.cross_attention_norm is `True` or `False`, and attn.norm_cross is `nn.LayerNorm`
+                refer to https://github.com/huggingface/diffusers/blob/f20c8f5a1aba27f5972cad50516f18ba516e4d9e/src/diffusers/models/cross_attention.py#L69
+
+                for diffusers==0.23.1: 
+                    `cross_attention_norm` can be `None`, "layer_norm", or "group_norm"
+                    , and `attn` does not store the `cross_attention_norm` as `self.cross_attention_norm`
+                    , instead, it uses self.norm_cross, which can be `None`, `nn.LayerNorm`, or `nn.GroupNorm`
+                refer to https://github.com/huggingface/diffusers/blob/4719b8f5f9714f1c0b3fd32addaf0f61a9939219/src/diffusers/models/attention_processor.py#L153
+            '''
+            encoder_hidden_states = attn.norm_cross(encoder_hidden_states)
+        key = attn.to_k(encoder_hidden_states)
+        value = attn.to_v(encoder_hidden_states)
+        # Sparse Attention
+        if not is_cross_attention:
+            bf,d,c = key.shape
+            assert bf==6 # [0,prev,crt] # NOTE for classifier_free_guidence
+            video_length = 3
+
+            
+            query_backup = rearrange(query.clone(), "(b f) d c -> b f d c", f=video_length)            
+            query_crt = query_backup[:,2,None,:,:].repeat(1,video_length,1,1)  # (b,f,d,c)
+            query_crt =  rearrange(query_crt, "b f d c -> (b f) d c")  # (bf, d, c)
+
+            query = attn.head_to_batch_dim(query)
+            query_crt = attn.head_to_batch_dim(query_crt)
+            key = attn.head_to_batch_dim(key)
+            value = attn.head_to_batch_dim(value)
+
+            attention_probs = attn.get_attention_scores(query, key, attention_mask) 
+            hidden_states = torch.bmm(attention_probs, value)
+            hidden_states = attn.batch_to_head_dim(hidden_states)
+
+            attention_probs_crt2prev = attn.get_attention_scores(query_crt, key, attention_mask) 
+            hidden_states_crt2prev = torch.bmm(attention_probs_crt2prev, value)
+            hidden_states_crt2prev = attn.batch_to_head_dim(hidden_states_crt2prev)
+            
+            hidden_states = rearrange(hidden_states, "(b f) d c -> b f d c", f=video_length)
+            hidden_states_crt2prev = rearrange(hidden_states_crt2prev, "(b f) d c -> b f d c", f=video_length)
+
+            crt2prev0 = hidden_states_crt2prev[:,0,:,:]  # (b,m,n)
+            crt2prev1 = hidden_states_crt2prev[:,1,:,:]  # (b,m,n)
+            crt2prev = 0.8 * crt2prev0 + 0.2* crt2prev1
+            hidden_states[:,-1,:,:] = crt2prev
+            hidden_states = rearrange(hidden_states, "b f d c -> (b f) d c")
+
+        else:
+
+            query = attn.head_to_batch_dim(query)
+            key = attn.head_to_batch_dim(key)
+            value = attn.head_to_batch_dim(value)
+
+            attention_probs = attn.get_attention_scores(query, key, attention_mask)
+            hidden_states = torch.bmm(attention_probs, value)
+            hidden_states = attn.batch_to_head_dim(hidden_states)
 
         # linear proj
         hidden_states = attn.to_out[0](hidden_states)
@@ -308,7 +401,7 @@ def main(args):
     save_images_as_mp4(img_seq,output_video_path)
     print(f"saved at {output_video_path}")
 
-
+@torch.no_grad()
 def main_cf_attn(args):
 
 
@@ -329,8 +422,13 @@ def main_cf_attn(args):
     if args.seed is not None:
         torch.manual_seed(args.seed)
 
+    cf_attn_type = args.get("cf_attn_type","1st_frame")
+    assert cf_attn_type in ["1st_frame","prev_frame","1st_prev"]
     if args.use_cf_attn:
-        cross_frame_attn_proc = CrossFrameAttnProcessor(unet_chunk_size=2)
+        if cf_attn_type == "1st_prev":
+            cross_frame_attn_proc = CrossFrameAttnProcessorPrev()
+        else:
+            cross_frame_attn_proc = CrossFrameAttnProcessor(unet_chunk_size=2)
         pipe.unet.set_attn_processor(processor=cross_frame_attn_proc)
         # assert False, "refer to /home/zhaizhichao/gkf_proj/Text2Video-Zero/sd_inpaint_anything_in_video.py"
         
@@ -366,12 +464,14 @@ def main_cf_attn(args):
         print("load mask cache from",mask_cache_path)
         cached_masks_before_dilate = np.load(mask_cache_path)
         cached_masks_before_dilate = [cached_masks_before_dilate[frame_id] for frame_id in range(cached_masks_before_dilate.shape[0])]
+        tqdm_desc = "load frames"
     else:
         print("no mask cache found, run SAM and it will be saved at",mask_cache_path)
         cached_masks_before_dilate = []
+        tqdm_desc = "apply SAM to each frame"
     
     img_seq,mask_seq = [],[]
-    for frame_id,img_path in enumerate(tqdm(img_paths,desc="apply SAM to each frame")):
+    for frame_id,img_path in enumerate(tqdm(img_paths,desc=tqdm_desc)):
 
         img = load_img_to_array(img_path)
         img_seq.append(img)
@@ -402,22 +502,41 @@ def main_cf_attn(args):
         mask_seq.append(masks[2])
     
     if not os.path.exists(mask_cache_path):
+        cached_masks_before_dilate = np.stack(cached_masks_before_dilate,axis=0)
         np.save(mask_cache_path,cached_masks_before_dilate)
     
     img_replaced_seq = []
-    for frame_id in tqdm(range(len(img_seq)),desc="pipeline froward"):
+    for frame_id in tqdm(range(len(img_seq)),desc="pipeline forward"):
         generator = torch.Generator(device='cuda').manual_seed(args.seed)
 
         img = img_seq[frame_id]
         mask = mask_seq[frame_id]
 
         img_padded, mask_padded, padding_factors = resize_and_pad(img, mask)
-        frame0,mask0,_ = resize_and_pad(img_seq[0], mask_seq[0])
+        if cf_attn_type == "1st_frame":
+            frame0,mask0,_ = resize_and_pad(img_seq[0], mask_seq[0])
+            batch_img_input = [Image.fromarray(frame0),Image.fromarray(img_padded)]
+            batch_mask_input = [Image.fromarray(255 - mask0),Image.fromarray(255 - mask_padded)]
+        elif cf_attn_type == "prev_frame":
+            prev_frame_id = frame_id-1 if frame_id >= 1 else 0
+            frame0,mask0,_ = resize_and_pad(img_seq[prev_frame_id], mask_seq[prev_frame_id])
+            batch_img_input = [Image.fromarray(frame0),Image.fromarray(img_padded)]
+            batch_mask_input = [Image.fromarray(255 - mask0),Image.fromarray(255 - mask_padded)]
+        else:
+            assert cf_attn_type == "1st_prev"
+
+            frame0,mask0,_ = resize_and_pad(img_seq[0], mask_seq[0])
+            prev_frame_id = frame_id-1 if frame_id >= 1 else 0
+            frame_prev,mask_prev,_ = resize_and_pad(img_seq[prev_frame_id], mask_seq[prev_frame_id])
+
+            batch_img_input = [Image.fromarray(frame0),Image.fromarray(frame_prev),Image.fromarray(img_padded)]
+            batch_mask_input = [Image.fromarray(255 - mask0),Image.fromarray(255 - mask_prev),Image.fromarray(255 - mask_padded)]
+
 
         img_padded = pipe(
-            prompt=[args.text_prompt]*2,
-            image=[Image.fromarray(frame0),Image.fromarray(img_padded)],
-            mask_image=[Image.fromarray(255 - mask0),Image.fromarray(255 - mask_padded)],
+            prompt=[args.text_prompt]*len(batch_mask_input),
+            image=batch_img_input,
+            mask_image=batch_mask_input,
             num_inference_steps=50,
             generator=generator,
         )#.images[0] # list of PIL Image
@@ -500,6 +619,9 @@ if __name__ == "__main__":
     stands on the lawn in front of a river
     
     CUDA_VISIBLE_DEVICES=1 python replace_anything_video.py --yaml_cfg_path configs/xinye2-Scene-001.yaml
+
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63]
+    e.g., window_size=4
 
     ##### xinye3-Scene-001.mp4.all_frames (酒吧-红裙子)
     CUDA_VISIBLE_DEVICES=0 python replace_anything_video.py \
