@@ -22,3 +22,8 @@ results/*
 example/*
 
 results*/*
+
+*.png
+*.gif
+*.jpg
+*.zip
