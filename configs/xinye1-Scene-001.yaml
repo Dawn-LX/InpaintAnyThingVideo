@@ -1,11 +1,18 @@
 
 
-input_imgs_dir: "/home/zhaizhichao/gkf_proj/FateZero-diffusers-0.11.1/FateZero-main/data/xinye1-Scene-001.mp4.all_frames"
+input_imgs_dir: "/home/gkf/Inpaint-Anything/data/xinye1-Scene-001.mp4.all_frames"
 point_coords: [0.5, 0.57]
-text_prompt: "stand on a fancy stage"
+text_prompt: "stand at a noisy street"
 dilate_kernel_size: 5
-seed: null
+seed: 15787
 sample_rate: 4
 use_cf_attn: True
+cf_attn_type: "1st_frame"
+progressive_alpha: 2
+exp_tag: "dilate5_CfAttn1st_waterfall_alpha2"
 
-# /home/zhaizhichao/gkf_proj/FateZero-diffusers-0.11.1/FateZero-main/data/xinye1-Scene-001.mp4.all_frames
+# progressive_alpha: 0.1
+# exp_tag: "dilate5_CfAttn1st_waterfall_alpha0.1"
+
+# text_prompt: "stand on a fancy wedding stage"
+# exp_tag: "dilate5_CfAttn1st_wedding_alpha0.1"

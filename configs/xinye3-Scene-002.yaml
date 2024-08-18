@@ -1,11 +1,11 @@
 input_imgs_dir: "/home/gkf/Inpaint-Anything/data/xinye3-Scene-001.mp4.all_frames"
 # point_coords: [0.6, 0.5]
 point_coords: [0.5677, 0.6854]
-text_prompt: "sits on a barstool in a fancy bar"
-# text_prompt: "sits on a stool holding a goblet, takling while drinking"
+# text_prompt: "sits on a barstool in a fancy bar"
+text_prompt: "sits on a stool on a stage, giving speech"
 dilate_kernel_size: 5
-seed: 15141
+seed: 47681
 sample_rate: 4
 use_cf_attn: True
 cf_attn_type: "1st_frame"
-exp_tag: "dilate5_CfAttn1st_bar"
+exp_tag: "dilate5_CfAttn1st_stage_speech"

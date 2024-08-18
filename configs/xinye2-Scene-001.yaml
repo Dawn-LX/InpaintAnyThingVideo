@@ -1,9 +1,15 @@
-input_imgs_dir: "/home/zhaizhichao/gkf_proj/FateZero-diffusers-0.11.1/FateZero-main/data/xinye2-Scene-001.mp4.all_frames.crop"
+input_imgs_dir: "/home/gkf/Inpaint-Anything/data/xinye2-Scene-001.mp4.all_frames.crop"
 point_coords: [0.6, 0.7]
-text_prompt: "sit on an outdoor bench"
+# text_prompt: "sit on the lawn in front of a river"
+text_prompt: "sit on the beach with sea and waves"
 dilate_kernel_size: 5
-seed: 1
+seed: 1444
 sample_rate: 4
 use_cf_attn: True
-cf_attn_type: "1st_prev"
-exp_tag: "dilate5_CfAttn_1st_prev"
+cf_attn_type: "1st_frame"
+progressive_alpha: 0
+exp_tag: "dilate5_CfAttn1st_beach_no_alpha"
+
+# 1st_prev: 0.8*1st + 0.2*prev
+# v2: 0.2 + 0.8
+# v3: 0.5 + 0.5

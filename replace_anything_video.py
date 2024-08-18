@@ -3,6 +3,7 @@ import os
 import sys
 import argparse
 import random
+import math
 from omegaconf import OmegaConf
 from collections import defaultdict
 import numpy as np
@@ -157,8 +158,9 @@ class CrossFrameAttnProcessorPrev:
 
             crt2prev0 = hidden_states_crt2prev[:,0,:,:]  # (b,m,n)
             crt2prev1 = hidden_states_crt2prev[:,1,:,:]  # (b,m,n)
-            crt2prev = 0.8 * crt2prev0 + 0.2* crt2prev1
+            crt2prev = 0.5 * crt2prev0 + 0.5* crt2prev1
             hidden_states[:,-1,:,:] = crt2prev
+            # print(hidden_states.shape)
             hidden_states = rearrange(hidden_states, "b f d c -> (b f) d c")
 
         else:
@@ -316,9 +318,11 @@ def main(args):
     elif args.coords_type == "key_in":
         latest_coords = args.point_coords
     
+    local_abs_path = "/home/gkf/.cache/huggingface/hub/zhaizhichao_huggingface_cache/models--stabilityai--stable-diffusion-2-inpainting/snapshots/81a84f49b15956b60b4272a405ad3daef3da4590"
     
     pipe = StableDiffusionInpaintPipeline.from_pretrained(
-        "stabilityai/stable-diffusion-2-inpainting",
+        # "stabilityai/stable-diffusion-2-inpainting",
+        local_abs_path,
         torch_dtype=torch.float32,
     ).to(device)
     # /home/zhaizhichao/.cache/huggingface/hub/models--stabilityai--stable-diffusion-2-inpainting/snapshots/81a84f49b15956b60b4272a405ad3daef3da4590
@@ -401,7 +405,7 @@ def main(args):
     save_images_as_mp4(img_seq,output_video_path)
     print(f"saved at {output_video_path}")
 
-@torch.no_grad()
+
 def main_cf_attn(args):
 
 
@@ -413,8 +417,11 @@ def main_cf_attn(args):
         latest_coords = args.point_coords
     
     
+    local_abs_path = "/home/gkf/.cache/huggingface/hub/zhaizhichao_huggingface_cache/models--stabilityai--stable-diffusion-2-inpainting/snapshots/81a84f49b15956b60b4272a405ad3daef3da4590"
+    
     pipe = SDInpaintVideoPipeline.from_pretrained(
-        "stabilityai/stable-diffusion-2-inpainting",
+        # "stabilityai/stable-diffusion-2-inpainting",
+        local_abs_path,
         torch_dtype=torch.float32,
     ).to(device)
     # /home/zhaizhichao/.cache/huggingface/hub/models--stabilityai--stable-diffusion-2-inpainting/snapshots/81a84f49b15956b60b4272a405ad3daef3da4590
@@ -505,6 +512,25 @@ def main_cf_attn(args):
         cached_masks_before_dilate = np.stack(cached_masks_before_dilate,axis=0)
         np.save(mask_cache_path,cached_masks_before_dilate)
     
+    if _alpha := args.get("progressive_alpha",0) > 0:
+        generator = torch.Generator(device='cpu').manual_seed(args.seed)
+        # build progressive noise
+        n_frames = len(img_seq)
+        randn_noise = torch.randn(size=(n_frames,4,64,64),generator=generator)
+        prev_noise = randn_noise[0,:,:,:]
+        progre_noises = [prev_noise]
+        for i in range(1,n_frames):
+            new_noise = (_alpha / math.sqrt(1+_alpha**2))  *prev_noise \
+                + (1 / math.sqrt(1+_alpha**2)) * randn_noise[i,:,:,:]
+            progre_noises.append(prev_noise)
+            prev_noise = new_noise
+        progre_noises = torch.stack(progre_noises,dim=0)
+    else:
+        progre_noises = None
+        
+
+
+
     img_replaced_seq = []
     for frame_id in tqdm(range(len(img_seq)),desc="pipeline forward"):
         generator = torch.Generator(device='cuda').manual_seed(args.seed)
@@ -517,12 +543,14 @@ def main_cf_attn(args):
             frame0,mask0,_ = resize_and_pad(img_seq[0], mask_seq[0])
             batch_img_input = [Image.fromarray(frame0),Image.fromarray(img_padded)]
             batch_mask_input = [Image.fromarray(255 - mask0),Image.fromarray(255 - mask_padded)]
+            frame_ids = [0,frame_id]
         elif cf_attn_type == "prev_frame":
             prev_frame_id = frame_id-1 if frame_id >= 1 else 0
             frame0,mask0,_ = resize_and_pad(img_seq[prev_frame_id], mask_seq[prev_frame_id])
             batch_img_input = [Image.fromarray(frame0),Image.fromarray(img_padded)]
             batch_mask_input = [Image.fromarray(255 - mask0),Image.fromarray(255 - mask_padded)]
-        else:
+            frame_ids = [prev_frame_id,frame_id]
+        elif cf_attn_type == "1st_prev":
             assert cf_attn_type == "1st_prev"
 
             frame0,mask0,_ = resize_and_pad(img_seq[0], mask_seq[0])
@@ -532,6 +560,15 @@ def main_cf_attn(args):
             batch_img_input = [Image.fromarray(frame0),Image.fromarray(frame_prev),Image.fromarray(img_padded)]
             batch_mask_input = [Image.fromarray(255 - mask0),Image.fromarray(255 - mask_prev),Image.fromarray(255 - mask_padded)]
 
+            frame_ids = [0,prev_frame_id,frame_id]
+        else:
+            assert not args.use_cf_attn
+            batch_img_input = [Image.fromarray(img_padded)]
+            batch_mask_input = [Image.fromarray(255 - mask_padded)]
+            frame_ids = [frame_id]
+
+        if progre_noises is not None:
+            progre_noise_i = progre_noises[frame_ids,:,:,:]
 
         img_padded = pipe(
             prompt=[args.text_prompt]*len(batch_mask_input),
@@ -539,6 +576,7 @@ def main_cf_attn(args):
             mask_image=batch_mask_input,
             num_inference_steps=50,
             generator=generator,
+            latents = progre_noise_i if progre_noises is not None else None,
         )#.images[0] # list of PIL Image
         img_padded = img_padded[-1]  #
         if IS_DEBUG: print(type(img_padded),"after pipe forward")
@@ -584,9 +622,9 @@ if __name__ == "__main__":
         point_labels = [1],
         text_prompt = "TODO",
         dilate_kernel_size = 5,
-        output_dir = "/home/zhaizhichao/gkf_proj/Inpaint-Anything/results3",
+        output_dir = "/home/gkf/Inpaint-Anything/results3",
         sam_model_type = "vit_h",
-        sam_ckpt  = "/home/zhaizhichao/gkf_proj/Inpaint-Anything/pretrained_models/sam_vit_h_4b8939.pth",
+        sam_ckpt  = "/home/gkf/Inpaint-Anything/pretrained_models/sam_vit_h_4b8939.pth",
         seed = None,
         sample_rate = 4,
         use_cf_attn = True,
@@ -687,5 +725,6 @@ if __name__ == "__main__":
         --seed 119 \
         --sample_rate 4 \
         --use_cf_attn \
+    
     
     """

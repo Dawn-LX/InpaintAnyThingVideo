@@ -1,7 +1,13 @@
-input_imgs_dir: "/home/zhaizhichao/gkf_proj/FateZero-diffusers-0.11.1/FateZero-main/data/xinye4-Scene-001.mp4.frames"
+input_imgs_dir: "/home/gkf/Inpaint-Anything/data/xinye4-Scene-001.mp4.frames"
 point_coords: [0.73, 0.86]
-text_prompt: "stand in front of a castle"
+text_prompt: "stand on the lawn in front of a river"
 dilate_kernel_size: 5
-seed: 119
+seed: 11934
 sample_rate: 4
-use_cf_attn: False
+use_cf_attn: True
+cf_attn_type: "1st_frame"
+progressive_alpha: 0
+exp_tag: "dilate5_CfAttn1st_river_no_alpha"
+
+
+# python replace_anything_video.py --yaml_cfg_path configs/xinye4-Scene-001.yaml

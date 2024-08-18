@@ -1,12 +1,119 @@
 import torch
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict,Tuple,List, Optional, Union
 from diffusers import StableDiffusionInpaintPipeline,AsymmetricAutoencoderKL
 
 
 
 # /home/zhaizhichao/miniconda3/envs/mmdiffusion/lib/python3.8/site-packages/diffusers/pipelines/stable_diffusion/pipeline_stable_diffusion_inpaint.py
 
+
+def randn_tensor(
+    shape: Union[Tuple, List],
+    generator: Optional[Union[List["torch.Generator"], "torch.Generator"]] = None,
+    device: Optional["torch.device"] = None,
+    dtype: Optional["torch.dtype"] = None,
+    layout: Optional["torch.layout"] = None,
+):
+    """A helper function to create random tensors on the desired `device` with the desired `dtype`. When
+    passing a list of generators, you can seed each batch size individually. If CPU generators are passed, the tensor
+    is always created on the CPU.
+    """
+    # device on which tensor is created defaults to device
+    rand_device = device
+    batch_size = shape[0]
+
+    layout = layout or torch.strided
+    device = device or torch.device("cpu")
+
+    if generator is not None:
+        gen_device_type = generator.device.type if not isinstance(generator, list) else generator[0].device.type
+        if gen_device_type != device.type and gen_device_type == "cpu":
+            rand_device = "cpu"
+            if device != "mps":
+                # logger.info(
+                #     f"The passed generator was created on 'cpu' even though a tensor on {device} was expected."
+                #     f" Tensors will be created on 'cpu' and then moved to {device}. Note that one can probably"
+                #     f" slighly speed up this function by passing a generator that was created on the {device} device."
+                # )
+                print(f"The passed generator was created on 'cpu' even though a tensor on {device} was expected.")
+        elif gen_device_type != device.type and gen_device_type == "cuda":
+            raise ValueError(f"Cannot generate a {device} tensor from a generator of type {gen_device_type}.")
+
+    # make sure generator list of length 1 is treated like a non-list
+    if isinstance(generator, list) and len(generator) == 1:
+        generator = generator[0]
+
+    if isinstance(generator, list):
+        shape = (1,) + shape[1:]
+        latents = [
+            torch.randn(shape, generator=generator[i], device=rand_device, dtype=dtype, layout=layout)
+            for i in range(batch_size)
+        ]
+        latents = torch.cat(latents, dim=0).to(device)
+    else:
+        latents = torch.randn(shape, generator=generator, device=rand_device, dtype=dtype, layout=layout).to(device)
+
+    return latents
+
 class SDInpaintVideoPipeline(StableDiffusionInpaintPipeline):
+    def prepare_latents(
+        self,
+        batch_size,
+        num_channels_latents,
+        height,
+        width,
+        dtype,
+        device,
+        generator,
+        latents=None,
+        image=None,
+        timestep=None,
+        is_strength_max=True,
+        return_noise=False,
+        return_image_latents=False,
+    ):
+        shape = (batch_size, num_channels_latents, height // self.vae_scale_factor, width // self.vae_scale_factor)
+        if isinstance(generator, list) and len(generator) != batch_size:
+            raise ValueError(
+                f"You have passed a list of generators of length {len(generator)}, but requested an effective batch"
+                f" size of {batch_size}. Make sure the batch size matches the length of the generators."
+            )
+
+        if (image is None or timestep is None) and not is_strength_max:
+            raise ValueError(
+                "Since strength < 1. initial latents are to be initialised as a combination of Image + Noise."
+                "However, either the image or the noise timestep has not been provided."
+            )
+
+        if return_image_latents or (latents is None and not is_strength_max):
+            image = image.to(device=device, dtype=dtype)
+
+            if image.shape[1] == 4:
+                image_latents = image
+            else:
+                image_latents = self._encode_vae_image(image=image, generator=generator)
+            image_latents = image_latents.repeat(batch_size // image_latents.shape[0], 1, 1, 1)
+
+        if latents is None:
+            noise = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
+            # if strength is 1. then initialise the latents to noise, else initial to image + noise
+            latents = noise if is_strength_max else self.scheduler.add_noise(image_latents, noise, timestep)
+            # if pure noise then scale the initial latents by the  Scheduler's init sigma
+            latents = latents * self.scheduler.init_noise_sigma if is_strength_max else latents
+        else:
+            noise = latents.to(device)
+            latents = noise * self.scheduler.init_noise_sigma
+
+        outputs = (latents,)
+
+        if return_noise:
+            outputs += (noise,)
+
+        if return_image_latents:
+            outputs += (image_latents,)
+
+        return outputs
+
     @torch.no_grad()
     def __call__(
         self,
@@ -149,7 +256,8 @@ class SDInpaintVideoPipeline(StableDiffusionInpaintPipeline):
             latents, noise, image_latents = latents_outputs
         else:
             latents, noise = latents_outputs
-        # print(latents.shape,"latents.shape") # (1,c,h,w)
+        # print(latents.shape,noise.shape,"latents.shape, noise.shape") # (bsz,c,h,w) == (bsz,4,64,64)
+        
         # 7. Prepare mask latent variables
         mask_condition = self.mask_processor.preprocess(mask_image, height=height, width=width)
 
